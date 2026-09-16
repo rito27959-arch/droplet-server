@@ -275,6 +275,26 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
                 room.broadcast(peerId!, data as String);
               }
 
+            // « En train d'écrire… » pour quelqu'un joint par Internet.
+            //
+            // ⚠️ REMIS À SA BOÎTE D'APPEL SANS LA REJOINDRE. Rejoindre la
+            // boîte de quelqu'un, c'est l'appeler : le serveur le réveillerait
+            // par une notification d'appel. Ici on dépose seulement le signal
+            // auprès de qui s'y trouve déjà ; personne n'y est (application
+            // fermée) = le signal se perd, et c'est très bien : il ne vaut que
+            // trois secondes.
+            case 'frappe':
+              final destinataire = msg['to'] as String?;
+              if (peerId == null || destinataire == null || destinataire.isEmpty) return;
+              _rooms['$_prefixeBoiteAppel$destinataire']?.broadcast(
+                peerId!,
+                jsonEncode({
+                  'type': 'frappe',
+                  'from': peerId,
+                  if (msg['g'] is String) 'g': msg['g'],
+                }),
+              );
+
             case 'leave':
               _removePeerFromRoom(roomId, peerId);
 
