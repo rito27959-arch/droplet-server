@@ -42,7 +42,11 @@ void _reveillerParPush(String destinataireId, {required String appelantId}) {
     try {
       await _httpClient.post(
         Uri.parse('$_directoryUrl/notify'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          // Seuls nos serveurs peuvent réveiller un téléphone (voir l'annuaire).
+          'x-cle-interne': _cleInterne,
+        },
         body: jsonEncode({
           'peerId': destinataireId,
           'title': 'Appel entrant',
@@ -204,6 +208,65 @@ Future<Response> _handleTurnCredentials(Request request) async {
   }
 }
 
+// ── Sécurité et limites ────────────────────────────────────────────
+//
+// • IDENTITÉ. Entrer dans une salle, c'est dire « je suis X ». Depuis la
+//   version de l'app qui signe, le message `join` porte `ts` et `sig` :
+//   la signature de X sur « GET /ws/<salle> <heure> <nonce> » (voir
+//   droplet_directory/lib/securite.dart). Le serveur la fait vérifier par
+//   l'annuaire, qui seul connaît la clé de X. Un identifiant qui a déjà
+//   signé une fois ne peut plus entrer sans signature : personne ne peut
+//   s'asseoir dans la boîte d'appel de quelqu'un d'autre pour intercepter
+//   ses appels, ni appeler en se faisant passer pour lui.
+// • LIMITES. Connexions par adresse IP, messages par seconde, taille d'un
+//   message, nombre de personnes par boîte d'appel : un client fou ne
+//   peut pas mettre le serveur à genoux.
+// • BATTEMENT. Un ping toutes les 25 s : les connexions mortes (téléphone
+//   passé en avion) sont fermées au lieu de s'accumuler.
+
+final String _cleInterne = Platform.environment['CLE_INTERNE'] ?? '';
+const _maxConnexionsParIp = 30;
+const _maxMessagesParSeconde = 40;
+const _tailleMaxMessage = 64 * 1024;
+const _maxParBoite = 12;
+final _connexionsParIp = <String, int>{};
+
+/// Les verdicts récents de l'annuaire, pour ne pas le solliciter à chaque
+/// reconnexion : identifiant|signature → (accepté, quand).
+final _verdicts = <String, (bool, DateTime)>{};
+
+String _adresse(Request r) {
+  final fwd = r.headers['x-forwarded-for'];
+  if (fwd != null && fwd.isNotEmpty) return fwd.split(',').first.trim();
+  final info = r.context['shelf.io.connection_info'];
+  return info is HttpConnectionInfo ? info.remoteAddress.address : 'inconnu';
+}
+
+/// [peerId] a-t-il le droit d'entrer dans [roomId] ? L'annuaire tranche ;
+/// s'il ne répond pas, on laisse passer (un appel vaut mieux qu'un refus
+/// à tort) — sauf signature présente et invalide.
+Future<bool> _identiteValide(String peerId, String roomId, Object? ts, Object? sig, Object? nonce) async {
+  final cle = '$peerId|${sig ?? '-'}';
+  final deja = _verdicts[cle];
+  if (deja != null && DateTime.now().difference(deja.$2) < const Duration(minutes: 2)) return deja.$1;
+  try {
+    final r = await _httpClient
+        .post(
+          Uri.parse('$_directoryUrl/interne/verifier'),
+          headers: {'content-type': 'application/json', 'x-cle-interne': _cleInterne},
+          body: jsonEncode({'peerId': peerId, 'methode': 'GET', 'chemin': '/ws/$roomId', 'ts': ts, 'sig': sig, 'nonce': nonce}),
+        )
+        .timeout(const Duration(seconds: 5));
+    if (r.statusCode != 200) return true;
+    final ok = (jsonDecode(r.body) as Map<String, dynamic>)['ok'] == true;
+    _verdicts[cle] = (ok, DateTime.now());
+    if (_verdicts.length > 50000) _verdicts.clear();
+    return ok;
+  } catch (_) {
+    return sig == null;
+  }
+}
+
 // ── WebSocket Signaling ────────────────────────────────────────────
 
 // ⚠️ CETTE SIGNATURE N'EST PAS UN DÉTAIL — LA ROUTE N'A JAMAIS MARCHÉ
@@ -221,19 +284,52 @@ Future<Response> _handleTurnCredentials(Request request) async {
 // tentative de connexion échouait donc avec un 500 générique, côté
 // client comme dans les journaux du serveur.
 FutureOr<Response> _handleWebSocket(Request request, String roomId) {
-  return webSocketHandler((channel) {
+  final ip = _adresse(request);
+  if ((_connexionsParIp[ip] ?? 0) >= _maxConnexionsParIp) {
+    return Response(429, body: 'trop de connexions');
+  }
+  if (roomId.length > 200) return Response(400);
+  return webSocketHandler(pingInterval: const Duration(seconds: 25), (channel) {
     String? peerId;
+    _connexionsParIp[ip] = (_connexionsParIp[ip] ?? 0) + 1;
+    var fenetre = DateTime.now();
+    var compte = 0;
 
-    channel.stream.listen(
-      (data) {
+    // Les messages sont traités UN PAR UN, dans l'ordre : la vérification
+    // d'identité du `join` prend un aller-retour vers l'annuaire, et une
+    // offre arrivée entre-temps ne doit pas passer devant.
+    var file = Future<void>.value();
+    Future<void> traiter(dynamic data) async {
         try {
+          // Débit et taille : au-delà, la connexion est coupée.
+          final maintenant = DateTime.now();
+          if (maintenant.difference(fenetre) > const Duration(seconds: 1)) {
+            fenetre = maintenant;
+            compte = 0;
+          }
+          if (++compte > _maxMessagesParSeconde || (data is String && data.length > _tailleMaxMessage)) {
+            channel.sink.close(1008, 'limite');
+            return;
+          }
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
           final type = msg['type'] as String?;
 
           switch (type) {
             case 'join':
-              peerId = msg['peerId'] as String?;
-              if (peerId == null) return;
+              final candidat = msg['peerId'] as String?;
+              if (candidat == null || candidat.isEmpty || candidat.length > 128) return;
+              if (!await _identiteValide(candidat, roomId, msg['ts'], msg['sig'], msg['nonce'])) {
+                print('[Server] ⛔ Entrée refusée dans $roomId (identité non prouvée)');
+                channel.sink.add(jsonEncode({'type': 'error', 'error': 'identite'}));
+                channel.sink.close(1008, 'identite');
+                return;
+              }
+              if (roomId.startsWith(_prefixeBoiteAppel) &&
+                  (_rooms[roomId]?.peerCount ?? 0) >= _maxParBoite) {
+                channel.sink.close(1008, 'salle pleine');
+                return;
+              }
+              peerId = candidat;
 
               final room = _getOrCreateRoom(roomId);
               // ⚠️ LU AVANT D'AJOUTER CE PEER — sert à savoir si la
@@ -304,9 +400,18 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
         } catch (e) {
           print('[Server] Erreur parsing: $e');
         }
-      },
+    }
+
+    channel.stream.listen(
+      (data) => file = file.then((_) => traiter(data)),
       onDone: () {
         _removePeerFromRoom(roomId, peerId);
+        final n = (_connexionsParIp[ip] ?? 1) - 1;
+        if (n <= 0) {
+          _connexionsParIp.remove(ip);
+        } else {
+          _connexionsParIp[ip] = n;
+        }
       },
     );
   })(request);
