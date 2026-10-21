@@ -1,0 +1,21 @@
+# Compile le serveur d'appels avant que Railway ne le déploie (branche main).
+# Le journal est publié sur la branche `journal`.
+name: Vérifier
+on:
+  push:
+    branches: [verif]
+permissions:
+  contents: write
+jobs:
+  compiler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: |
+          set +e
+          ( dart pub get; echo "pub: $?"; dart analyze lib; echo "analyse: $?"; dart compile exe lib/server.dart -o /tmp/srv; echo "compilation: $?" ) > /tmp/journal.txt 2>&1
+          cat /tmp/journal.txt
+          git config user.name ci; git config user.email ci@users.noreply.github.com
+          git checkout -q --orphan journal; git rm -rfq . >/dev/null
+          cp /tmp/journal.txt journal.txt; git add journal.txt; git commit -qm "journal $GITHUB_SHA"; git push -fq origin journal

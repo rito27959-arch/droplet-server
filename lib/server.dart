@@ -127,11 +127,34 @@ final _loggedRouter = const Pipeline()
     .addMiddleware(logRequests())
     .addHandler(_router.call);
 
-FutureOr<Response> _dispatch(Request request) {
+FutureOr<Response> _dispatch(Request request) async {
   if (request.url.path.startsWith('ws/')) {
     return _router.call(request);
   }
-  return _loggedRouter(request);
+  // Droplet Web demande ses identifiants de relais depuis le navigateur :
+  // sans ces en-têtes, la requête est bloquée avant de partir.
+  final cors = _entetesCors(request);
+  if (request.method == 'OPTIONS') return Response(204, headers: cors);
+  final reponse = await _loggedRouter(request);
+  return cors.isEmpty ? reponse : reponse.change(headers: cors);
+}
+
+/// Les origines de Droplet Web (et ses aperçus Vercel).
+Map<String, String> _entetesCors(Request r) {
+  final o = r.headers['origin'];
+  if (o == null) return const {};
+  final permis = o == 'https://web.dropletmesh.app' ||
+      o == 'https://dropletmesh.app' ||
+      o.endsWith('.vercel.app') ||
+      o.startsWith('http://localhost:');
+  if (!permis) return const {};
+  return {
+    'access-control-allow-origin': o,
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type',
+    'access-control-max-age': '86400',
+    'vary': 'origin',
+  };
 }
 
 // ── Health Check ───────────────────────────────────────────────────
@@ -355,10 +378,18 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
               // personne n'écoute pour l'instant. Le bon moment pour
               // pousser une notification, plutôt que de laisser
               // l'offre WebRTC partir dans une salle vide.
-              if (roomId.startsWith(_prefixeBoiteAppel)) {
+              //
+              // ⚠️ DEUX EXCEPTIONS, depuis que Droplet Web écoute aussi la
+              // boîte du téléphone auquel il est lié :
+              //   • un appareil qui vient ÉCOUTER (`ecoute: true`, Droplet
+              //     Web) n'est pas un appel : il ne réveille personne ;
+              //   • « personne n'écoute » veut dire « le téléphone n'est pas
+              //     là », pas « la salle est vide » — sinon, le navigateur
+              //     ouvert, le téléphone endormi n'était plus jamais réveillé.
+              if (roomId.startsWith(_prefixeBoiteAppel) && msg['ecoute'] != true) {
                 final destinataireId =
                     roomId.substring(_prefixeBoiteAppel.length);
-                if (destinataireId != peerId && dejaPresents.isEmpty) {
+                if (destinataireId != peerId && !dejaPresents.contains(destinataireId)) {
                   _reveillerParPush(destinataireId, appelantId: peerId!);
                 }
               }
