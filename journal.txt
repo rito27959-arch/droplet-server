@@ -1,0 +1,29 @@
+Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 105.0.0 (110.0.0 available)
+  analyzer 14.1.0 (14.6.0 available)
+  coverage 1.15.1 (1.16.0 available)
+  frontend_server_client 4.0.0 (4.2.0 available)
+  http_multi_server 3.2.2 (3.2.3 available)
+  shelf 1.4.2 (1.4.3 available)
+  shelf_router 1.1.4 (1.1.5 available)
+  shelf_static 1.1.3 (1.2.0 available)
+  shelf_web_socket 1.0.4 (3.0.0 available)
+  test 1.31.2 (1.33.0 available)
+  test_api 0.7.13 (0.7.15 available)
+  test_core 0.6.19 (0.6.21 available)
+  vm_service 15.3.0 (15.4.0 available)
+  web 0.5.1 (1.1.1 available)
+  web_socket_channel 2.4.5 (3.0.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `dart pub outdated` for more information.
+pub: 0
+Analyzing lib...
+
+warning - server.dart:434:39 - Unnecessary cast. Try removing the cast. - unnecessary_cast
+
+1 issue found.
+analyse: 2
+Generated: /tmp/srv
+compilation: 0
