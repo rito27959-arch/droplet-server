@@ -166,6 +166,10 @@ Response _handleHealth(Request request) {
       'rooms': _rooms.length,
       'totalPeers': _rooms.values.fold(0, (sum, r) => sum + r.peerCount),
       'uptime': DateTime.now().toIso8601String(),
+      // Ce que ce serveur sait faire : Droplet Web n'écoute la boîte d'appels
+      // du téléphone que si « ecoute » y figure (sinon, chaque entrée du
+      // navigateur réveillerait le téléphone comme un appel).
+      'fonctions': ['ecoute', 'from-verifie'],
     }),
     headers: {'content-type': 'application/json'},
   );
