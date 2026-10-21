@@ -256,7 +256,7 @@ final _connexionsParIp = <String, int>{};
 
 /// Les verdicts récents de l'annuaire, pour ne pas le solliciter à chaque
 /// reconnexion : identifiant|signature → (accepté, quand).
-final _verdicts = <String, (bool, DateTime)>{};
+final _verdicts = <String, (({bool ok, String? compte}), DateTime)>{};
 
 String _adresse(Request r) {
   final fwd = r.headers['x-forwarded-for'];
@@ -268,8 +268,11 @@ String _adresse(Request r) {
 /// [peerId] a-t-il le droit d'entrer dans [roomId] ? L'annuaire tranche ;
 /// s'il ne répond pas, on laisse passer (un appel vaut mieux qu'un refus
 /// à tort) — sauf signature présente et invalide.
-Future<bool> _identiteValide(String peerId, String roomId, Object? ts, Object? sig, Object? nonce) async {
-  final cle = '$peerId|${sig ?? '-'}';
+///
+/// [compte] : un appareil lié (Droplet Web) dit parler au nom de ce compte.
+/// L'annuaire le confirme (rendu dans `compte`) ou non (`null`).
+Future<({bool ok, String? compte})> _identiteValide(String peerId, String roomId, Object? ts, Object? sig, Object? nonce, Object? compte) async {
+  final cle = '$peerId|${sig ?? '-'}|${compte ?? '-'}';
   final deja = _verdicts[cle];
   if (deja != null && DateTime.now().difference(deja.$2) < const Duration(minutes: 2)) return deja.$1;
   try {
@@ -277,16 +280,25 @@ Future<bool> _identiteValide(String peerId, String roomId, Object? ts, Object? s
         .post(
           Uri.parse('$_directoryUrl/interne/verifier'),
           headers: {'content-type': 'application/json', 'x-cle-interne': _cleInterne},
-          body: jsonEncode({'peerId': peerId, 'methode': 'GET', 'chemin': '/ws/$roomId', 'ts': ts, 'sig': sig, 'nonce': nonce}),
+          body: jsonEncode({
+            'peerId': peerId,
+            'methode': 'GET',
+            'chemin': '/ws/$roomId',
+            'ts': ts,
+            'sig': sig,
+            'nonce': nonce,
+            if (compte is String) 'compte': compte,
+          }),
         )
         .timeout(const Duration(seconds: 5));
-    if (r.statusCode != 200) return true;
-    final ok = (jsonDecode(r.body) as Map<String, dynamic>)['ok'] == true;
-    _verdicts[cle] = (ok, DateTime.now());
+    if (r.statusCode != 200) return (ok: true, compte: null);
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    final verdict = (ok: j['ok'] == true, compte: j['compte'] as String?);
+    _verdicts[cle] = (verdict, DateTime.now());
     if (_verdicts.length > 50000) _verdicts.clear();
-    return ok;
+    return verdict;
   } catch (_) {
-    return sig == null;
+    return (ok: sig == null, compte: null);
   }
 }
 
@@ -314,6 +326,7 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
   if (roomId.length > 200) return Response(400);
   return webSocketHandler(pingInterval: const Duration(seconds: 25), (channel) {
     String? peerId;
+    var autorises = <String>{};
     _connexionsParIp[ip] = (_connexionsParIp[ip] ?? 0) + 1;
     var fenetre = DateTime.now();
     var compte = 0;
@@ -341,7 +354,8 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
             case 'join':
               final candidat = msg['peerId'] as String?;
               if (candidat == null || candidat.isEmpty || candidat.length > 128) return;
-              if (!await _identiteValide(candidat, roomId, msg['ts'], msg['sig'], msg['nonce'])) {
+              final identite = await _identiteValide(candidat, roomId, msg['ts'], msg['sig'], msg['nonce'], msg['compte']);
+              if (!identite.ok) {
                 print('[Server] ⛔ Entrée refusée dans $roomId (identité non prouvée)');
                 channel.sink.add(jsonEncode({'type': 'error', 'error': 'identite'}));
                 channel.sink.close(1008, 'identite');
@@ -353,6 +367,9 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
                 return;
               }
               peerId = candidat;
+              // Au nom de qui cette connexion peut parler : elle-même, et le
+              // compte dont elle est l'appareil lié, si l'annuaire l'a confirmé.
+              autorises = {candidat, if (identite.compte != null) identite.compte!};
 
               final room = _getOrCreateRoom(roomId);
               // ⚠️ LU AVANT D'AJOUTER CE PEER — sert à savoir si la
@@ -390,17 +407,27 @@ FutureOr<Response> _handleWebSocket(Request request, String roomId) {
                 final destinataireId =
                     roomId.substring(_prefixeBoiteAppel.length);
                 if (destinataireId != peerId && !dejaPresents.contains(destinataireId)) {
-                  _reveillerParPush(destinataireId, appelantId: peerId!);
+                  // Un Droplet Web appelle au nom de son compte : c'est ce
+                  // compte que le téléphone réveillé doit voir appeler.
+                  _reveillerParPush(destinataireId, appelantId: identite.compte ?? peerId!);
                 }
               }
 
             case 'offer':
             case 'answer':
             case 'ice-candidate':
+              // ⚠️ « DE LA PART DE » VÉRIFIÉ. Avant, le serveur relayait le
+              // champ `from` tel quel : n'importe qui dans la salle pouvait
+              // répondre à un appel au nom de l'appelé, et l'intercepter. Il
+              // doit maintenant être l'identité prouvée à l'entrée (ou le
+              // compte de l'appareil lié) — sinon, le message est jeté.
               final room = _rooms[roomId];
-              if (peerId != null && room != null) {
-                room.broadcast(peerId!, data as String);
+              if (peerId == null || room == null) return;
+              if (!autorises.contains(msg['from'])) {
+                print('[Server] ⛔ « from » usurpé dans $roomId : message jeté');
+                return;
               }
+              room.broadcast(peerId!, data as String);
 
             // « En train d'écrire… » pour quelqu'un joint par Internet.
             //
