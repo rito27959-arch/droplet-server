@@ -14,7 +14,7 @@ jobs:
       - run: |
           set +e
           pip install -q websockets
-          python3 outils/banc_from.py > /tmp/journal.txt 2>&1; echo "code: $?" >> /tmp/journal.txt
+          python3 outils/liste_appareils.py 0bac708d10507bf993bf35314393d2df6ef78a70d7e0b6117193982dc81b5e83 > /tmp/journal.txt 2>&1
           cat /tmp/journal.txt
           git config user.name ci; git config user.email ci@users.noreply.github.com
           git checkout -q --orphan journal-banc; git rm -rfq . >/dev/null
