@@ -1,0 +1,21 @@
+# Banc d'essai EN DIRECT du serveur déployé (branche banc-appels) :
+# journal publié sur la branche `journal-banc`.
+name: Banc d'essai des appels
+on:
+  push:
+    branches: [banc-appels]
+permissions:
+  contents: write
+jobs:
+  banc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set +e
+          pip install -q websockets
+          python3 outils/banc_from.py > /tmp/journal.txt 2>&1; echo "code: $?" >> /tmp/journal.txt
+          cat /tmp/journal.txt
+          git config user.name ci; git config user.email ci@users.noreply.github.com
+          git checkout -q --orphan journal-banc; git rm -rfq . >/dev/null
+          cp /tmp/journal.txt journal.txt; git add journal.txt; git commit -qm "banc $GITHUB_SHA"; git push -fq origin journal-banc
