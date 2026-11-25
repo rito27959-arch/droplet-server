@@ -32,9 +32,10 @@ export const PALIERS = Object.freeze({
  * `famille` sert à l'app pour ranger la boutique.
  */
 export const PRODUITS = Object.freeze({
-  // ── Droplet Pro ──
-  pro_30j: { famille: 'pro', type: 'abonnement', prix: 100n, jours: 30 },
-  pro_365j: { famille: 'pro', type: 'abonnement', prix: 1000n, jours: 365 },
+  // ── Droplet Pro : comme aujourd'hui, payé une fois, à vie (1 000 F) ──
+  // Le type 'abonnement' existe et est testé, mais aucune offre ne l'utilise
+  // tant qu'un abonnement n'a pas été décidé : l'app promet « sans abonnement ».
+  pro: { famille: 'pro', type: 'definitif', prix: 100n },
 
   // ── Personnalisation (définitif) ──
   pack_premium: { famille: 'personnalisation', type: 'definitif', prix: 50n },

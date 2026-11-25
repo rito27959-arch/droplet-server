@@ -4,7 +4,7 @@ Des crédits Droplet en **boucle fermée**, à la manière des étoiles de Teleg
 
 - **Registre en partie double** dans PostgreSQL. Les montants sont des entiers, il n'y a pas de découvert, les écritures sont en ajout seul et le journal d'audit est chaîné (`src/schema.sql`, `src/registre.js`).
 - **Recharges** : crédit seulement sur confirmation relue chez l'opérateur, une seule fois, et réconciliation toutes les 30 s (`src/recharges.js`).
-- **Boutique** : Pro, packs, stickers et cadeaux à offrir ; reçus signés, vérifiables hors ligne (`src/catalogue.js`, `src/achats.js`).
+- **Boutique** : Pro (à vie, comme aujourd’hui), packs, stickers et cadeaux à offrir ; reçus signés, vérifiables hors ligne (`src/catalogue.js`, `src/achats.js`).
 - **Opérateurs** : MTN en direct, Fapshi (MTN et Orange), Orange en direct en attente de sa spécification (`src/fournisseurs/`, `docs/API-FOURNISSEURS.md`).
 - **Identité** : requêtes signées par la clé d'appareil Droplet ID. Le compte est attesté par Droplet ID (`POST /v1/attestations`, branche `pay-attestation`).
 

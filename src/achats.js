@@ -46,8 +46,8 @@ export function exposerDroit(d, clePrivee) {
  * référence de l'opération, si bien qu'un achat rejoué ne débite pas deux
  * fois, même si la table d'idempotence avait été contournée.
  */
-export async function acheter(c, { compte, produit, destinataire = null, cle, clePrivee }) {
-  const p = PRODUITS[produit];
+export async function acheter(c, { compte, produit, destinataire = null, cle, clePrivee, catalogue = PRODUITS }) {
+  const p = catalogue[produit];
   if (!p) throw new ErreurMetier('produit_inconnu');
   if (!cle) throw new ErreurMetier('cle_idempotence_requise');
   const beneficiaire = destinataire ?? compte;
@@ -82,7 +82,7 @@ export async function acheter(c, { compte, produit, destinataire = null, cle, cl
   let debut = maintenant;
   let fin = null;
   if (p.type === 'abonnement') {
-    const memeFamille = Object.keys(PRODUITS).filter((k) => PRODUITS[k].famille === p.famille && PRODUITS[k].type === 'abonnement');
+    const memeFamille = Object.keys(catalogue).filter((k) => catalogue[k].famille === p.famille && catalogue[k].type === 'abonnement');
     const cours = await c.query('select max(fin) as fin from droits where compte = $1 and produit = any($2)', [beneficiaire, memeFamille]);
     const finActuelle = cours.rows[0].fin ? new Date(cours.rows[0].fin) : null;
     if (finActuelle && finActuelle > maintenant) debut = finActuelle;

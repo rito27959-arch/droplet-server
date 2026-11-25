@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 
+import { acheter } from '../src/achats.js';
+import { enTransaction } from '../src/db.js';
 import { lireJeton } from '../src/jetons.js';
 import { reconcilier } from '../src/recharges.js';
 import { verifierRegistre } from '../src/registre.js';
@@ -220,16 +222,20 @@ describe('boutique', () => {
     assert.equal((await a.requete('POST', '/v1/achats', { produit: 'stickers_droplet' }, { entetes: { 'Idempotency-Key': 'def-2-abcd' } })).corps.erreur, 'deja_possede');
   });
 
-  test('Pro 30 jours acheté deux fois se prolonge au lieu de se recouvrir', async () => {
+  test('un abonnement acheté deux fois se prolonge au lieu de se recouvrir', async () => {
+    // Aucune offre d'abonnement n'est en vente : on teste le mécanisme avec
+    // un catalogue d'essai, directement sur la base.
     const a = appareil(env);
     await a.enregistrer();
     await rechargerEtConfirmer(a, 'g250');
-    const r1 = await a.requete('POST', '/v1/achats', { produit: 'pro_30j' }, { entetes: { 'Idempotency-Key': 'pro-1-abcd' } });
-    const r2 = await a.requete('POST', '/v1/achats', { produit: 'pro_30j' }, { entetes: { 'Idempotency-Key': 'pro-2-abcd' } });
-    assert.equal(new Date(r2.corps.droit.debut).getTime(), new Date(r1.corps.droit.fin).getTime());
-    const jours = (new Date(r2.corps.droit.fin) - new Date(r1.corps.droit.debut)) / 86_400_000;
+    const catalogue = { essai_30j: { famille: 'essai', type: 'abonnement', prix: 100n, jours: 30 } };
+    const achat = (cle) => enTransaction(pool, (c) => acheter(c, { compte: a.compte, produit: 'essai_30j', cle, catalogue }));
+    const r1 = await achat('abo-1-abcd');
+    const r2 = await achat('abo-2-abcd');
+    assert.equal(new Date(r2.droit.debut).getTime(), new Date(r1.droit.fin).getTime());
+    const jours = (new Date(r2.droit.fin) - new Date(r1.droit.debut)) / 86_400_000;
     assert.ok(Math.abs(jours - 60) < 0.001);
-    assert.equal(r2.corps.solde, '60');
+    assert.equal((await a.requete('GET', '/v1/moi')).corps.solde, '60');
   });
 
   test('offrir Pro à quelqu’un : c’est l’autre qui en profite, et il voit qui l’a offert', async () => {
@@ -238,11 +244,12 @@ describe('boutique', () => {
     await a.enregistrer();
     await b.enregistrer();
     await rechargerEtConfirmer(a, 'g100');
-    const r = await a.requete('POST', '/v1/achats', { produit: 'pro_30j', destinataire: b.compte }, { entetes: { 'Idempotency-Key': 'cadeau-pro-1' } });
+    const r = await a.requete('POST', '/v1/achats', { produit: 'pro', destinataire: b.compte }, { entetes: { 'Idempotency-Key': 'cadeau-pro-1' } });
     assert.equal(r.statut, 200, JSON.stringify(r.corps));
+    assert.equal(r.corps.droit.fin, null);
     const moiB = await b.requete('GET', '/v1/moi');
     assert.equal(moiB.corps.solde, '0');
-    assert.equal(moiB.corps.droits[0].produit, 'pro_30j');
+    assert.equal(moiB.corps.droits[0].produit, 'pro');
     assert.equal(moiB.corps.droits[0].offertPar, a.compte);
     assert.equal((await a.requete('GET', '/v1/moi')).corps.droits.length, 0);
     assert.equal((await a.requete('POST', '/v1/achats', { produit: 'cadeau_bouquet', destinataire: 'compte_inexistant' }, { entetes: { 'Idempotency-Key': 'cadeau-x-12' } })).corps.erreur, 'destinataire_inconnu');
