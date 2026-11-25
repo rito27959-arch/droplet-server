@@ -1,0 +1,17 @@
+{
+  "name": "droplet-pay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Droplet Pay — les Gouttes : registre en partie double, recharges Mobile Money, boutique",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 'test/*.test.js'"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}
