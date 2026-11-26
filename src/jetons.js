@@ -7,7 +7,7 @@
 //   • L'ATTESTATION (préfixe DIA1) est signée par Droplet ID. Elle dit :
 //     « l'appareil X, de clé K, appartient au compte S, pour Droplet Pay ».
 //     C'est ce qui attache le solde à la PERSONNE et pas au téléphone : un
-//     nouveau téléphone sur le même compte Droplet ID retrouve ses Gouttes.
+//     nouveau téléphone sur le même compte Droplet ID retrouve ses crédits.
 //
 //   • LE REÇU (préfixe DPR1) est signé par Droplet Pay. Il dit « le compte S
 //     a droit au produit P jusqu'à telle date ». L'app le vérifie hors ligne

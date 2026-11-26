@@ -1,9 +1,9 @@
 // ============================================================================
-// LES RECHARGES — de l'argent Mobile Money vers des Gouttes.
+// LES RECHARGES — de l'argent Mobile Money vers des Droplet Credits (DC).
 // ----------------------------------------------------------------------------
 // Le parcours :
 //
-//   creee ──initier()──▶ en_attente ──statut()=reussie──▶ reussie  (+ Gouttes)
+//   creee ──initier()──▶ en_attente ──statut()=reussie──▶ reussie  (+ DC)
 //                          │                  └─────────▶ echouee
 //                          └── trop long, ou réponse douteuse ──▶ a_verifier
 //
@@ -21,18 +21,26 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { PALIERS } from './catalogue.js';
+import { lirePalier } from './catalogue.js';
 import { enTransaction } from './db.js';
 import { masquer, numeroLocal } from './fournisseurs/telephone.js';
 import { journaliser } from './journal.js';
 import { codePortefeuille, ErreurMetier, passerOperation } from './registre.js';
+
+/** (payment_events.) Chaque réponse d'opérateur, gardée telle quelle. */
+async function evenement(c, recharge, source, s) {
+  await c.query(
+    'insert into evenements_paiement (recharge, source, etat, montant, devise, message) values ($1, $2, $3, $4, $5, $6)',
+    [recharge, source, s.etat ?? null, s.montant != null ? s.montant.toString() : null, s.devise ?? null, s.message ? String(s.message).slice(0, 200) : null],
+  );
+}
 
 export function exposerRecharge(r) {
   return {
     id: r.id,
     palier: r.palier,
     montantXaf: r.montant_xaf.toString(),
-    gouttes: r.gouttes.toString(),
+    credits: r.credits.toString(),
     operateurFournisseur: r.fournisseur,
     telephone: r.telephone_masque,
     etat: r.etat,
@@ -42,7 +50,7 @@ export function exposerRecharge(r) {
 }
 
 export async function creerRecharge(pool, fournisseurs, { compte, palier, operateur, telephone }) {
-  const p = PALIERS[palier];
+  const p = await lirePalier(pool, String(palier ?? ''));
   if (!p) throw new ErreurMetier('palier_inconnu');
   const local = numeroLocal(telephone);
   if (!local) throw new ErreurMetier('telephone_invalide');
@@ -58,9 +66,9 @@ export async function creerRecharge(pool, fournisseurs, { compte, palier, operat
 
   const r = await enTransaction(pool, async (c) => {
     const ins = await c.query(
-      `insert into recharges (id, compte, palier, montant_xaf, gouttes, fournisseur, devise, telephone_masque, ref_fournisseur, etat)
+      `insert into recharges (id, compte, palier, montant_xaf, credits, fournisseur, devise, telephone_masque, ref_fournisseur, etat)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'creee') returning *`,
-      [id, compte, palier, p.montantXaf.toString(), p.gouttes.toString(), f.nom, f.devise, masquer(local), refAvance],
+      [id, compte, palier, p.montantXaf.toString(), p.credits.toString(), f.nom, f.devise, masquer(local), refAvance],
     );
     await journaliser(c, compte, 'recharge.creee', { recharge: id, palier, fournisseur: f.nom });
     return ins.rows[0];
@@ -68,7 +76,7 @@ export async function creerRecharge(pool, fournisseurs, { compte, palier, operat
 
   let maj;
   try {
-    const { refFournisseur } = await f.initier({ reference: id, montant: p.montantXaf, telephone: local, description: 'Droplet — Gouttes' });
+    const { refFournisseur } = await f.initier({ reference: id, montant: p.montantXaf, telephone: local, description: 'Droplet Credits' });
     maj = { etat: 'en_attente', ref: refFournisseur, message: null };
   } catch (e) {
     // Réponse explicite de l'opérateur (« numéro invalide ») : rien n'est
@@ -87,6 +95,7 @@ export async function creerRecharge(pool, fournisseurs, { compte, palier, operat
         where id = $1 and etat = 'creee' returning *`,
       [id, maj.etat, maj.ref, maj.message],
     );
+    await evenement(c, id, 'initiation', { etat: maj.etat, message: maj.message });
     await journaliser(c, compte, `recharge.${maj.etat}`, { recharge: id });
     return exposerRecharge(u.rows[0] ?? r);
   });
@@ -96,7 +105,7 @@ export async function creerRecharge(pool, fournisseurs, { compte, palier, operat
  * Relit une recharge chez l'opérateur et en tire les conséquences.
  * Sans effet sur une recharge déjà terminée.
  */
-export async function actualiserRecharge(pool, fournisseurs, id, { delaiVerificationMinutes = 60 } = {}) {
+export async function actualiserRecharge(pool, fournisseurs, id, { delaiVerificationMinutes = 60, source = 'statut' } = {}) {
   const lue = await pool.query('select * from recharges where id = $1', [id]);
   const r = lue.rows[0];
   if (!r) throw new ErreurMetier('recharge_inconnue', 404);
@@ -109,6 +118,7 @@ export async function actualiserRecharge(pool, fournisseurs, id, { delaiVerifica
   } catch (e) {
     s = { etat: 'inconnu', message: String(e.message).slice(0, 200) };
   }
+  await evenement(pool, r.id, source, s);
 
   if (s.etat === 'reussie') {
     // Le montant et la devise relus chez l'opérateur doivent être ceux que
@@ -124,15 +134,15 @@ export async function actualiserRecharge(pool, fournisseurs, id, { delaiVerifica
         reference: `recharge:${r.id}`,
         details: { recharge: r.id, fournisseur: r.fournisseur, montantXaf: r.montant_xaf.toString(), devise: r.devise },
         lignes: [
-          { code: `compensation:${r.fournisseur}`, nature: 'compensation', montant: -r.gouttes },
-          { code: codePortefeuille(r.compte), nature: 'portefeuille', compte: r.compte, montant: r.gouttes },
+          { code: `compensation:${r.fournisseur}`, nature: 'compensation', montant: -r.credits },
+          { code: codePortefeuille(r.compte), nature: 'portefeuille', compte: r.compte, montant: r.credits },
         ],
       });
       const u = await c.query(
         `update recharges set etat = 'reussie', message = null, maj_le = now() where id = $1 and etat <> 'reussie' returning *`,
         [r.id],
       );
-      if (!op.deja) await journaliser(c, 'systeme', 'recharge.reussie', { recharge: r.id, gouttes: r.gouttes, operation: op.id });
+      if (!op.deja) await journaliser(c, 'systeme', 'recharge.reussie', { recharge: r.id, credits: r.credits, operation: op.id });
       return exposerRecharge(u.rows[0] ?? { ...r, etat: 'reussie' });
     });
   }

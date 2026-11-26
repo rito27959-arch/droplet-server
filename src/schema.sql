@@ -12,7 +12,7 @@
 --   3. Rien ne s'efface. Les écritures et le journal refusent UPDATE et DELETE.
 --      Une erreur se corrige par une nouvelle opération (nature `correction`).
 --
--- Tous les montants sont des ENTIERS (bigint) : des Gouttes, ou des francs
+-- Tous les montants sont des ENTIERS (bigint) : des Droplet Credits (DC), ou des francs
 -- CFA pour ce qui vient des opérateurs. Aucun nombre à virgule nulle part.
 -- ============================================================================
 
@@ -101,14 +101,14 @@ drop trigger if exists ecritures_immuables on ecritures;
 create trigger ecritures_immuables before update or delete on ecritures
   for each row execute function interdire_modification();
 
--- ── Recharges (argent réel → Gouttes) ───────────────────────────────────────
+-- ── Recharges (argent réel → DC) ───────────────────────────────────────
 
 create table if not exists recharges (
   id                uuid primary key,
   compte            text not null references comptes(id),
   palier            text not null,
   montant_xaf       bigint not null check (montant_xaf > 0),
-  gouttes           bigint not null check (gouttes > 0),
+  credits           bigint not null check (credits > 0),
   fournisseur       text not null,
   devise            text not null,             -- ce qui est demandé à l'opérateur (XAF ; EUR en sandbox MTN)
   telephone_masque  text not null,
@@ -124,17 +124,107 @@ create index if not exists recharges_compte on recharges (compte, cree_le desc);
 
 -- ── Droits (ce qui a été acheté) ────────────────────────────────────────────
 
+-- (user_inventory + subscriptions de la spécification : un droit daté est
+-- un abonnement, un droit sans fin est un objet possédé.)
 create table if not exists droits (
   id          uuid primary key,
   compte      text not null references comptes(id),   -- qui en profite
   produit     text not null,
   debut       timestamptz not null,
   fin         timestamptz,                            -- null = définitif
-  operation   uuid not null references operations(id),
+  operation   uuid references operations(id),         -- null = article gratuit
+  via         text,                                   -- la collection qui l'a apporté, s'il y a lieu
   offert_par  text references comptes(id),
+  revoque_le  timestamptz,                            -- remboursé
   cree_le     timestamptz not null default now()
 );
 create index if not exists droits_compte on droits (compte, produit);
+-- Un article définitif n'est possédé qu'une fois (hors droits révoqués) :
+-- c'est la base qui empêche le double achat, pas seulement le code.
+create unique index if not exists droits_definitif_unique on droits (compte, produit)
+  where fin is null and revoque_le is null;
+
+-- ── La boutique : tout ce qui se règle depuis l'administration ──────────────
+
+create table if not exists categories (
+  cle       text primary key,
+  ordre     int not null default 0
+);
+
+create table if not exists collections (
+  cle        text primary key,
+  ordre      int not null default 0,
+  active     boolean not null default true,
+  cree_le    timestamptz not null default now()
+);
+
+create table if not exists createurs (
+  id          text primary key,
+  compte      text references comptes(id),
+  nom_public  text not null,
+  statut      text not null default 'actif' check (statut in ('actif', 'suspendu')),
+  cree_le     timestamptz not null default now()
+);
+
+-- (store_products + creator_products de la spécification.)
+create table if not exists produits (
+  cle         text primary key,
+  categorie   text not null references categories(cle),
+  genre       text not null,            -- cadre, style_nom, badge, theme, stickers, pack, pro, premium, collection
+  type        text not null check (type in ('definitif', 'abonnement', 'collection')),
+  prix        bigint not null check (prix >= 0),
+  jours       int check (jours is null or jours > 0),
+  collection  text references collections(cle),
+  createur    text references createurs(id),
+  statut      text not null default 'publie' check (statut in ('brouillon', 'en_revue', 'publie', 'refuse', 'retire')),
+  motif       text,                     -- raison d'un refus de modération
+  ordre       int not null default 0,
+  nouveau     boolean not null default false,
+  mis_en_avant boolean not null default false,
+  donnees     jsonb not null default '{}',   -- ce que l'app doit savoir pour l'afficher (couleurs, motif…)
+  cree_le     timestamptz not null default now(),
+  maj_le      timestamptz not null default now(),
+  check ((type = 'abonnement') = (jours is not null))
+);
+
+-- Les articles qu'apporte une collection.
+create table if not exists collection_articles (
+  produit_collection  text not null references produits(cle),
+  produit             text not null references produits(cle),
+  primary key (produit_collection, produit)
+);
+
+-- Pour mesurer l'effet d'un changement de prix : on garde chaque prix et
+-- sa date, et les ventes se comparent avant / après.
+create table if not exists prix_historique (
+  id        bigserial primary key,
+  produit   text not null references produits(cle),
+  prix      bigint not null,
+  depuis    timestamptz not null default now(),
+  par       text not null
+);
+
+-- (credit_packages.)
+create table if not exists paliers (
+  cle          text primary key,
+  credits      bigint not null check (credits > 0),
+  montant_xaf  bigint not null check (montant_xaf > 0),
+  actif        boolean not null default true,
+  ordre        int not null default 0
+);
+
+-- (payment_events.) Chaque réponse d'opérateur relue, telle quelle.
+create table if not exists evenements_paiement (
+  id         bigserial primary key,
+  recharge   uuid not null references recharges(id),
+  source     text not null check (source in ('initiation', 'statut', 'rappel')),
+  etat       text,
+  montant    bigint,
+  devise     text,
+  message    text,
+  quand      timestamptz not null default now()
+);
+create index if not exists evenements_recharge on evenements_paiement (recharge, id);
 
 -- ── Idempotence ─────────────────────────────────────────────────────────────
 

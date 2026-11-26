@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 
+import { semerCatalogue } from './catalogue.js';
+
 // bigint (int8) → BigInt côté JS : un solde ne passe jamais par un Number.
 pg.types.setTypeParser(20, (v) => BigInt(v));
 
@@ -16,6 +18,7 @@ export async function migrer(pool) {
   try {
     await c.query('select pg_advisory_lock(727274)');
     await c.query(sql);
+    await semerCatalogue(c);
   } finally {
     await c.query('select pg_advisory_unlock(727274)').catch(() => {});
     c.release();

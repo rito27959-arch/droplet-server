@@ -19,9 +19,11 @@
 // ============================================================================
 
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import http from 'node:http';
 
 import { acheter, droitsActifs } from './achats.js';
+import { jetonValide, routeAdmin } from './admin.js';
 import { catalogueExpose } from './catalogue.js';
 import { enTransaction } from './db.js';
 import { verifierAttestation } from './jetons.js';
@@ -106,7 +108,7 @@ export function creerApp({ pool, config, fournisseurs, clePriveeRecus }) {
     let m;
 
     if (req.method === 'GET' && p === '/sante') return json(res, 200, { ok: true });
-    if (req.method === 'GET' && p === '/v1/catalogue') return json(res, 200, catalogueExpose());
+    if (req.method === 'GET' && p === '/v1/catalogue') return json(res, 200, await catalogueExpose(pool));
     if (req.method === 'GET' && p === '/v1/operateurs') {
       const etat = (op) => {
         const f = fournisseurs.pour(op);
@@ -117,14 +119,33 @@ export function creerApp({ pool, config, fournisseurs, clePriveeRecus }) {
 
     // ── Rappels des opérateurs : un simple « va relire » ──
     if ((req.method === 'POST' || req.method === 'PUT') && (m = p.match(/^\/v1\/rappels\/mtn\/([0-9a-f-]{36})$/))) {
-      await actualiserRecharge(pool, fournisseurs, m[1], config).catch(() => {});
+      await actualiserRecharge(pool, fournisseurs, m[1], { ...config, source: 'rappel' }).catch(() => {});
       return json(res, 200, { ok: true });
     }
     if (req.method === 'POST' && p === '/v1/rappels/fapshi') {
       const transId = String(analyser(corps).transId ?? '');
       const r = await pool.query("select id from recharges where fournisseur = 'fapshi' and ref_fournisseur = $1", [transId]);
-      if (r.rowCount) await actualiserRecharge(pool, fournisseurs, r.rows[0].id, config).catch(() => {});
+      if (r.rowCount) await actualiserRecharge(pool, fournisseurs, r.rows[0].id, { ...config, source: 'rappel' }).catch(() => {});
       return json(res, 200, { ok: true });
+    }
+
+    // ── L'administration : une page, et son API derrière un jeton ──
+    if (p === '/admin' || p.startsWith('/admin/')) {
+      if (!config.adminEmpreinte) throw new ErreurMetier('introuvable', 404);
+      if (req.method === 'GET' && (p === '/admin' || p === '/admin/')) {
+        const page = await readFile(new URL('./admin.html', import.meta.url));
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+          'X-Frame-Options': 'DENY',
+        });
+        return res.end(page);
+      }
+      if (!jetonValide(req.headers.authorization, config.adminEmpreinte)) throw new ErreurMetier('non_autorise', 401);
+      const r = await routeAdmin(pool, { methode: req.method, p, url, corps: corps ? analyser(corps) : {} });
+      if (!r) throw new ErreurMetier('introuvable', 404);
+      return json(res, r.statut, r.corps);
     }
 
     // ── Enregistrement d'un appareil ──

@@ -1,5 +1,5 @@
 // ============================================================================
-// LE REGISTRE — la comptabilité en partie double des Gouttes.
+// LE REGISTRE — la comptabilité en partie double des Droplet Credits (DC).
 // ----------------------------------------------------------------------------
 // Une opération = un fait réel (une recharge confirmée, un achat). Elle écrit
 // au moins deux lignes dont la somme est nulle :

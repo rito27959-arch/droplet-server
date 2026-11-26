@@ -1,7 +1,7 @@
 // Outils de test. La base est un VRAI PostgreSQL (TEST_DATABASE_URL) ; seuls
 // les opérateurs sont remplacés par des doubles de test, clairement nommés.
 
-import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 
 import { chargerConfig } from '../src/config.js';
 import { migrer, ouvrir } from '../src/db.js';
@@ -56,6 +56,7 @@ export async function demarrer({ pool, fournisseur }) {
   const cleDroplet = clePriveeDepuisGraine(graine());
   const cleRecus = clePriveeDepuisGraine(graine());
   const config = chargerConfig({
+    adminEmpreinte: createHash('sha256').update('jeton-admin-de-test-0123456789abcdefghijkl').digest('hex'),
     dropletId: { emetteur: 'https://id-test.dropletmesh.app', clePublique: clePubliqueBrute(cleDroplet) },
   });
   const serveur = creerApp({ pool, config, fournisseurs: fournisseursDe(fournisseur), clePriveeRecus: cleRecus });

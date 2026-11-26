@@ -34,6 +34,9 @@ export function chargerConfig(surcharges = {}) {
       clePublique: lire('DROPLET_ID_CLE_ATTESTATION', ''),
     },
 
+    // L'administration : l'EMPREINTE SHA-256 (hex) du jeton, jamais le jeton.
+    adminEmpreinte: lire('ADMIN_JETON_SHA256', '').toLowerCase(),
+
     // La clé qui signe les reçus de droits, pour que l'app les vérifie hors
     // ligne, comme les licences. Graine Ed25519 brute, base64url.
     cleRecus: lire('PAY_CLE_RECUS', ''),

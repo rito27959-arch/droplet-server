@@ -53,7 +53,7 @@ test('MTN : jeton, RequestToPay puis statut, conformes à la documentation', asy
   );
   assert.equal(mtn.disponible, true);
 
-  const { refFournisseur } = await mtn.initier({ reference: ref, montant: 1000n, telephone: '677001122', description: 'Droplet — Gouttes' });
+  const { refFournisseur } = await mtn.initier({ reference: ref, montant: 1000n, telephone: '677001122', description: 'Droplet Credits' });
   assert.equal(refFournisseur, ref);
 
   const [tok, rtp] = recues;
@@ -71,8 +71,8 @@ test('MTN : jeton, RequestToPay puis statut, conformes à la documentation', asy
     currency: 'EUR',
     externalId: ref,
     payer: { partyIdType: 'MSISDN', partyId: '237677001122' },
-    payerMessage: 'Droplet — Gouttes',
-    payeeNote: 'Droplet — Gouttes',
+    payerMessage: 'Droplet Credits',
+    payeeNote: 'Droplet Credits',
   });
 
   const s = await mtn.statut(ref);
@@ -98,11 +98,11 @@ test('Fapshi : direct-pay et payment-status, conformes au Worker existant', asyn
     'GET /payment-status/T123abc': [200, { transId: 'T123abc', status: 'SUCCESSFUL', amount: 500, externalId: 'ref-1' }],
   };
   const f = creerFapshi({ base: `${base}/`, apiUser: 'au', apiKey: 'ak' });
-  const { refFournisseur } = await f.initier({ reference: 'ref-1', montant: 500n, telephone: '699001122', description: 'Droplet — Gouttes' });
+  const { refFournisseur } = await f.initier({ reference: 'ref-1', montant: 500n, telephone: '699001122', description: 'Droplet Credits' });
   assert.equal(refFournisseur, 'T123abc');
   assert.equal(recues[0].entetes.apiuser, 'au');
   assert.equal(recues[0].entetes.apikey, 'ak');
-  assert.deepEqual(JSON.parse(recues[0].corps), { amount: 500, phone: '699001122', externalId: 'ref-1', message: 'Droplet — Gouttes' });
+  assert.deepEqual(JSON.parse(recues[0].corps), { amount: 500, phone: '699001122', externalId: 'ref-1', message: 'Droplet Credits' });
 
   assert.equal((await f.statut('T123abc', 'ref-1')).etat, 'reussie');
   // Une transaction réussie qui n'est pas la nôtre n'est pas prise.
