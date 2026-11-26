@@ -188,7 +188,8 @@ describe('boutique', () => {
     const r = await fetch(`${env.base}/v1/catalogue`).then((x) => x.json());
     assert.deepEqual(r.categories, ['identite', 'messenger', 'premium', 'collections']);
     assert.ok(r.produits.find((p) => p.cle === 'col_harmattan').articles.includes('theme_sable'));
-    assert.equal(r.produits.find((p) => p.cle === 'premium_30j'), undefined);
+    assert.equal(r.produits.find((p) => p.cle === 'premium_30j').jours, 30);
+    assert.equal(r.produits.find((p) => p.cle === 'pro'), undefined);
     assert.equal(r.produits.find((p) => p.cle === 'cadre_goutte').prix, '0');
   });
 
@@ -313,6 +314,20 @@ describe('boutique', () => {
     assert.deepEqual(h.corps.lignes.map((l) => [l.nature, l.montant]), [['achat', '-60'], ['recharge', '100']]);
   });
 
+  test('Droplet Premium : 500 DC pour 30 jours, racheté il se prolonge, reçu daté', async () => {
+    const a = await nouveau();
+    await rechargerEtConfirmer(a, 'premium'); // 1 000 DC
+    const r1 = await achat(a, 'premium_30j', 'prem-1-abcd');
+    assert.equal(r1.statut, 200, JSON.stringify(r1.corps));
+    assert.equal(r1.corps.prix, '500');
+    const r2 = await achat(a, 'premium_30j', 'prem-2-abcd');
+    assert.equal(new Date(r2.corps.droits[0].debut).getTime(), new Date(r1.corps.droits[0].fin).getTime());
+    assert.equal(await solde(a), '0');
+    const recu = lireJeton('DPR1', r2.corps.droits[0].recu, env.cleRecusPub);
+    assert.equal(recu.produit, 'premium_30j');
+    assert.ok(recu.fin > recu.debut);
+  });
+
   test('un abonnement acheté deux fois se prolonge (catalogue d’essai)', async () => {
     const a = await nouveau();
     await rechargerEtConfirmer(a, 'standard');
@@ -346,13 +361,13 @@ describe('administration', () => {
     assert.equal((await admin('PATCH', '/admin/v1/produits/badge_feuille', { prix: -3 })).corps.erreur, 'prix_invalide');
   });
 
-  test('publier un brouillon, retirer un article', async () => {
-    await admin('PATCH', '/admin/v1/produits/premium_30j', { statut: 'publie' });
+  test('retirer un article puis le republier', async () => {
+    await admin('PATCH', '/admin/v1/produits/badge_comete', { statut: 'retire' });
     let cat = await fetch(`${env.base}/v1/catalogue`).then((x) => x.json());
-    assert.equal(cat.produits.find((p) => p.cle === 'premium_30j').jours, 30);
-    await admin('PATCH', '/admin/v1/produits/premium_30j', { statut: 'brouillon' });
+    assert.equal(cat.produits.find((p) => p.cle === 'badge_comete'), undefined);
+    await admin('PATCH', '/admin/v1/produits/badge_comete', { statut: 'publie' });
     cat = await fetch(`${env.base}/v1/catalogue`).then((x) => x.json());
-    assert.equal(cat.produits.find((p) => p.cle === 'premium_30j'), undefined);
+    assert.equal(cat.produits.find((p) => p.cle === 'badge_comete').prix, '50');
   });
 
   test('ajouter un article : genre connu, nom français exigé', async () => {

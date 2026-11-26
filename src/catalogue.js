@@ -14,7 +14,8 @@
 // ⚠️ CHAQUE ARTICLE VENDU EST LIVRÉ PAR L'APP. On n'ajoute pas ici un genre
 // que l'app ne sait pas appliquer (un « effet », un « son ») : ce serait
 // vendre du vide. Les genres connus de l'app v1 :
-//   cadre, style_nom, badge, theme, stickers, pack, pro, premium, collection.
+//   cadre, style_nom, badge, theme, stickers, pack, premium, collection
+// (« pro » reste compris par l'app pour les reçus anciens, mais n'est plus vendu).
 // ============================================================================
 
 const t = (fr, en) => ({ fr, en });
@@ -93,21 +94,19 @@ export const PRODUITS = [
       nom: t('Icônes et fonds', 'Icons & wallpapers'), texte: t('Les icônes d’app et les fonds premium de Droplet, avec les stickers Éclat.', 'Droplet’s premium app icons and wallpapers, with the Éclat stickers.'),
       obtenu: t('Le même pack qu’aujourd’hui, à vous pour toujours.', 'The same pack as today, yours forever.') } },
 
-  // ── Premium ──
-  { cle: 'pro', categorie: 'premium', genre: 'pro', prix: 1000, ordre: 1, mis_en_avant: true,
+  // ── Premium : remplace Droplet Pro dans le Store ──
+  // Tout ce que Pro donnait, pour 30 jours. Pas de renouvellement
+  // automatique : on rachète pour prolonger, et la nouvelle période
+  // commence à la fin de la précédente. Les licences Pro déjà payées
+  // restent valables dans l'app.
+  { cle: 'premium_30j', categorie: 'premium', genre: 'premium', type: 'abonnement', jours: 30, prix: 500, ordre: 1, mis_en_avant: true,
     donnees: {
-      nom: t('Droplet Pro', 'Droplet Pro'), texte: t('Tout Pro, une fois pour toutes : vocaux en texte, traduction sur le téléphone, mise en forme, icônes, fonds et badge.', 'All of Pro, once and for all: voice-to-text, on-device translation, formatting, icons, wallpapers and badge.'),
-      obtenu: t('À vie, sans abonnement, comme aujourd’hui.', 'For life, no subscription, as today.') } },
-  // ⚠️ En BROUILLON : un abonnement à 500 DC/mois ferait doublon avec Pro
-  // à vie à 1 000 DC. À publier depuis l'administration une fois ses
-  // avantages propres décidés.
-  { cle: 'premium_30j', categorie: 'premium', genre: 'premium', type: 'abonnement', jours: 30, prix: 500, ordre: 2, statut: 'brouillon',
-    donnees: {
-      nom: t('Droplet Premium', 'Droplet Premium'), texte: t('Abonnement de 30 jours. Ne se renouvelle pas tout seul.', '30-day subscription. Does not renew by itself.'),
-      obtenu: t('30 jours, puis il s’arrête. Rien n’est prélevé sans vous.', '30 days, then it stops. Nothing is charged without you.') } },
+      nom: t('Droplet Premium', 'Droplet Premium'),
+      texte: t('Vocaux en texte, traduction sur le téléphone, mise en forme, icônes et fonds premium, stickers Éclat et badge. Pour 30 jours.', 'Voice-to-text, on-device translation, formatting, premium icons and wallpapers, Éclat stickers and badge. For 30 days.'),
+      obtenu: t('30 jours, puis il s’arrête. Rien n’est prélevé sans vous : rachetez pour prolonger.', '30 days, then it stops. Nothing is charged without you: buy again to extend.') } },
 
   // ── Collections : moins cher que les articles un par un, pour de vrai ──
-  { cle: 'col_harmattan', categorie: 'collections', genre: 'collection', type: 'collection', prix: 199, ordre: 1, collection: 'harmattan', mis_en_avant: true,
+  { cle: 'col_harmattan', categorie: 'collections', genre: 'collection', type: 'collection', prix: 199, ordre: 1, collection: 'harmattan',
     articles: ['theme_sable', 'cadre_sceau', 'nom_grave'],
     donnees: {
       nom: t('Harmattan', 'Harmattan'), texte: t('Le thème Sable, le cadre Sceau et le nom Gravé, ensemble.', 'The Sand theme, the Seal frame and the Engraved name, together.'),
